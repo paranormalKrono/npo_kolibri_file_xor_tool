@@ -1,0 +1,11 @@
+{
+  "cmake.buildDirectory": "${workspaceFolder}/build/debug",
+  "cmake.exportCompileCommandsFile": true,
+  "cmake.configureOnOpen": true,
+  "cmake.preferredGenerators": [
+    "MinGW Makefiles",
+    "Ninja",
+    "Unix Makefiles"
+  ],
+  "C_Cpp.errorSquiggles": "disabled"
+}
