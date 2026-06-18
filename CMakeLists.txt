@@ -9,7 +9,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Test)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Test)
 qt_standard_project_setup()
 
 # Исходники основного приложения
@@ -19,15 +19,25 @@ set(PROJECT_SOURCES
     src/mainwindow.h
     src/worker.cpp
     src/worker.h
+    src/file_processor.cpp
+    src/file_processor.h
+    src/file_result.h
+    src/file_cache.cpp
+    src/file_cache.h
+    src/file_utils.cpp
+    src/file_utils.h
     src/utils/hex_parser.cpp
     src/utils/hex_parser.h
-    src/utils/file_utils.cpp
-    src/utils/file_utils.h
+    src/operations/ibinary_operation.h
+    src/operations/binary_operations.cpp
+    src/operations/binary_operations.h
+    src/operations/operation_factory.cpp
+    src/operations/operation_factory.h
 )
 
 qt_add_executable(${PROJECT_NAME} ${PROJECT_SOURCES})
 
-target_link_libraries(${PROJECT_NAME} PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets)
+target_link_libraries(${PROJECT_NAME} PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent)
 
 if(MINGW)
     target_link_options(${PROJECT_NAME} PRIVATE -static-libgcc -static-libstdc++)
@@ -75,39 +85,47 @@ if(WIN32)
 endif()
 
 # ==========================================
-# ТЕСТЫ
+# ТЕСТЫ (раздельные исполняемые файлы)
 # ==========================================
 enable_testing()
 
-# Явно указываем пути от корня проекта
-set(TEST_SOURCES
-    ${CMAKE_SOURCE_DIR}/src/tests/test_main.cpp
-)
-
-qt_add_executable(${PROJECT_NAME}_tests ${TEST_SOURCES})
-
-target_link_libraries(${PROJECT_NAME}_tests PRIVATE
-    Qt6::Core
-    Qt6::Gui
-    Qt6::Widgets
-    Qt6::Test
-)
-
-# Добавляем исходники приложения, которые мы хотим протестировать
-target_sources(${PROJECT_NAME}_tests PRIVATE
-    ${CMAKE_SOURCE_DIR}/src/utils/hex_parser.cpp
-    ${CMAKE_SOURCE_DIR}/src/utils/file_utils.cpp
+set(APP_SOURCES_FOR_TESTS
+    ${CMAKE_SOURCE_DIR}/src/mainwindow.cpp
     ${CMAKE_SOURCE_DIR}/src/worker.cpp
+    ${CMAKE_SOURCE_DIR}/src/file_cache.cpp
+    ${CMAKE_SOURCE_DIR}/src/file_processor.cpp
+    ${CMAKE_SOURCE_DIR}/src/file_utils.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/hex_parser.cpp
+
+    ${CMAKE_SOURCE_DIR}/src/operations/binary_operations.cpp
+    ${CMAKE_SOURCE_DIR}/src/operations/operation_factory.cpp
+    
+    ${CMAKE_SOURCE_DIR}/src/tests/test_helpers.cpp
+    ${CMAKE_SOURCE_DIR}/src/tests/test_gui_helpers.cpp
 )
 
-# Даем тестам доступ к заголовочным файлам приложения
-target_include_directories(${PROJECT_NAME}_tests PRIVATE 
-    ${CMAKE_SOURCE_DIR}/src
-    ${CMAKE_SOURCE_DIR}/src/utils
-)
+macro(add_qt_test TEST_NAME TEST_SOURCE)
+    qt_add_executable(${TEST_NAME} ${TEST_SOURCE})
+    target_link_libraries(${TEST_NAME} PRIVATE
+        Qt6::Core
+        Qt6::Gui
+        Qt6::Widgets
+        Qt6::Test
+        Qt6::Concurrent
+    )
+    target_include_directories(${TEST_NAME} PRIVATE 
+        ${CMAKE_SOURCE_DIR}/src
+    )
+    target_sources(${TEST_NAME} PRIVATE ${APP_SOURCES_FOR_TESTS})
+    add_test(NAME ${TEST_NAME} COMMAND ${TEST_NAME})
+endmacro()
 
-# Регистрируем тест в CTest
-add_test(NAME FileXorToolTests COMMAND ${PROJECT_NAME}_tests)
+add_qt_test(test_file_utils ${CMAKE_SOURCE_DIR}/src/tests/test_file_utils.cpp)
+add_qt_test(test_file_cache ${CMAKE_SOURCE_DIR}/src/tests/test_file_cache.cpp)
+add_qt_test(test_worker     ${CMAKE_SOURCE_DIR}/src/tests/test_worker.cpp)
+add_qt_test(test_stress     ${CMAKE_SOURCE_DIR}/src/tests/test_stress.cpp)
+add_qt_test(test_mainwindow ${CMAKE_SOURCE_DIR}/src/tests/test_mainwindow.cpp)
+add_qt_test(test_operations ${CMAKE_SOURCE_DIR}/src/tests/test_operations.cpp)
 
 # ==========================================
 # Упаковка

@@ -4,73 +4,106 @@
 #include <QMainWindow>
 #include <QThread>
 #include <QTimer>
+#include <QFileSystemWatcher>
+#include <QPushButton>
 #include <QLineEdit>
 #include <QCheckBox>
+#include <QRadioButton>
 #include <QSpinBox>
 #include <QProgressBar>
 #include <QLabel>
-#include <QPushButton>
-#include <QRadioButton>
-#include <QGroupBox>
-#include <QVBoxLayout>
-#include <QHBoxLayout>
-#include <QFormLayout>
-#include <QFileDialog>
-#include <QMessageBox>
-
+#include <QMutex>
+#include <QQueue>
+#include <QTableWidget>
+#include <QMap>
+#include <QPointer>
 #include "worker.h"
-#include "utils/hex_parser.h"
 
 class MainWindow : public QMainWindow
 {
   Q_OBJECT
 
 public:
-  MainWindow(QWidget *parent = nullptr);
-  ~MainWindow();
+  explicit MainWindow(QWidget *parent = nullptr);
+  ~MainWindow() override;
 
-protected:
-  void closeEvent(QCloseEvent *event) override;
+signals:
+  void workerFinished();
 
 private slots:
   void onBrowseInput();
   void onBrowseOutput();
-  void onStartStop();
+  void onStart();
   void onPauseResume();
+  void onStop();
   void onTimerToggled(bool checked);
+  void onWatcherToggled(bool checked);
+  void onClearCache();
+  void onCheckCache();
+  void onXorKeyChanged(const QString &text);
+
   void onWorkerProgressChanged(qint64 processed, qint64 total);
   void onWorkerFileProgressChanged(const QString &fileName, qint64 processed, qint64 total);
   void onWorkerStatusMessage(const QString &msg);
   void onWorkerFinished();
+  void onWorkerFileStarted(const QString &fileName, qint64 fileSize);
+  void onWorkerFileFinished(const QString &fileName, bool success);
+  void onWorkerFileSkipped(const QString &fileName);
+
+  void onFileChanged(const QString &path);
+  void onDirectoryChanged(const QString &path);
 
 private:
   void createUI();
-  void startProcessing();
-  void stopProcessing();
-  QByteArray parseHexKey(const QString &hex);
+  void setupConnections();
+  void updateXorKeyValidation();
+  void updateFileTable(const QString &fileName, const QString &status, int progress = -1);
 
-  // UI элементы
-  QLineEdit *m_inputDirEdit;
-  QLineEdit *m_outputDirEdit;
-  QLineEdit *m_fileMaskEdit;
-  QLineEdit *m_xorKeyEdit;
-  QCheckBox *m_deleteInputCheck;
-  QRadioButton *m_overwriteRadio;
-  QRadioButton *m_counterRadio;
-  QRadioButton *m_onceRadio;
-  QRadioButton *m_timerRadio;
-  QSpinBox *m_timerIntervalSpin;
-  QPushButton *m_startButton;
-  QPushButton *m_pauseButton;
-  QProgressBar *m_progressBar;
-  QLabel *m_statusLabel;
-  QLabel *m_fileStatusLabel;
+  QPointer<QLineEdit> m_inputDirEdit;
+  QPointer<QLineEdit> m_outputDirEdit;
+  QPointer<QLineEdit> m_fileMaskEdit;
+  QPointer<QLineEdit> m_xorKeyEdit;
+  QPointer<QLabel> m_xorKeyStatusLabel;
+  QPointer<QCheckBox> m_deleteInputCheck;
+  QPointer<QRadioButton> m_overwriteRadio;
+  QPointer<QRadioButton> m_skipRadio;
+  QPointer<QRadioButton> m_numberingRadio;
 
-  // Worker и поток
-  QThread *m_workerThread;
-  Worker *m_worker;
-  QTimer *m_timer;
-  bool m_isProcessing;
+  QPointer<QRadioButton> m_manualRadio;
+  QPointer<QRadioButton> m_timerRadio;
+  QPointer<QRadioButton> m_watcherRadio;
+  QPointer<QSpinBox> m_timerIntervalSpin;
+
+  QPointer<QPushButton> m_browseInputBtn;
+  QPointer<QPushButton> m_browseOutputBtn;
+  QPointer<QPushButton> m_startButton;
+  QPointer<QPushButton> m_pauseButton;
+  QPointer<QPushButton> m_stopButton;
+  QPointer<QPushButton> m_clearCacheBtn;
+  QPointer<QPushButton> m_checkCacheBtn;
+
+  QPointer<QProgressBar> m_progressBar;
+  QPointer<QLabel> m_fileStatusLabel;
+  QPointer<QLabel> m_statusLabel;
+  QPointer<QLabel> m_statsLabel;
+  QPointer<QLabel> m_cacheInfoLabel;
+
+  QPointer<QTableWidget> m_fileTable;
+  QMap<QString, int> m_fileRowMap;
+
+  QThread *m_workerThread = nullptr;
+  Worker *m_worker = nullptr;
+  QTimer *m_timer = nullptr;
+  QFileSystemWatcher *m_watcher = nullptr;
+
+  QQueue<QString> m_fileQueue;
+  QMutex m_queueMutex;
+
+  bool m_watcherActive = false;
+  bool m_isProcessing = false;
+  int m_processedCount = 0;
+  int m_skippedCount = 0;
+  int m_totalFiles = 0;
 };
 
 #endif // MAINWINDOW_H

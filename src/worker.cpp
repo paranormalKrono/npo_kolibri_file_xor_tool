@@ -1,168 +1,253 @@
 #include "worker.h"
+#include "file_processor.h"
+#include "file_cache.h"
+#include "operations/ibinary_operation.h"
+#include "operations/operation_factory.h"
 #include <QDir>
-#include <QFile>
 #include <QFileInfo>
-#include <QThread>
 
 Worker::Worker(QObject *parent)
-    : QObject(parent)
+    : QObject(parent), m_threadPool(new QThreadPool(this))
 {
+}
+
+Worker::~Worker()
+{
+  // Сигнализируем всем задачам о завершении
+  m_isStopped = true;
+
+  // Убираем задачи из очереди (которые ещё не начались)
+  m_threadPool->clear();
+
+  // Ждём завершения текущих задач
+  // Они проверят m_isStopped и быстро завершатся
+  m_threadPool->waitForDone();
 }
 
 void Worker::setConfig(const QString &inputDir,
                        const QString &outputDir,
                        const QString &fileMask,
-                       const QByteArray &xorKey,
+                       const QString &operationName,
+                       const QByteArray &operationParams,
                        bool deleteInput,
-                       bool overwriteMode)
+                       ConflictMode conflictMode,
+                       int threadCount)
 {
   m_inputDir = inputDir;
   m_outputDir = outputDir;
   m_fileMask = fileMask;
-  m_xorKey = xorKey;
+
+  m_operation = OperationFactory::createByName(operationName, operationParams);
+  if (!m_operation)
+  {
+    qCritical() << "Failed to create operation:" << operationName;
+  }
+
   m_deleteInput = deleteInput;
-  m_overwriteMode = overwriteMode;
+  m_conflictMode = conflictMode;
+  m_threadCount = threadCount;
+  m_threadPool->setMaxThreadCount(threadCount);
 }
 
-QString Worker::getUniquePath(const QString &basePath)
+void Worker::setFilesToProcess(const QStringList &files)
 {
-  return FileUtils::getUniquePath(basePath);
+  m_filesToProcess = files;
 }
 
 void Worker::processFiles()
 {
-  QDir dir(m_inputDir);
-  if (!dir.exists())
+  qDebug() << "=== Worker::processFiles() started ===";
+
+  if (!m_operation)
   {
-    emit statusMessage("Директория не найдена: " + m_inputDir);
+    emit statusMessage("Ошибка: операция не создана");
     emit finished();
     return;
   }
 
-  QStringList filters;
-  filters << m_fileMask;
-  QFileInfoList fileList = dir.entryInfoList(filters, QDir::Files);
+  m_state = WorkerState::Running;
+  m_isPaused = false;
+  m_isStopped = false;
+  m_totalProcessed.store(0);
+
+  {
+    QMutexLocker locker(&m_progressMutex);
+    m_fileProgress.clear();
+    m_finishedEmitted = false;
+  }
+
+  QFileInfoList fileList;
+  if (!m_filesToProcess.isEmpty())
+  {
+    for (const QString &path : m_filesToProcess)
+    {
+      QFileInfo fi(path);
+      if (m_cache && fi.absoluteFilePath() == m_cache->cacheFilePath())
+      {
+        continue;
+      }
+      fileList << fi;
+    }
+    m_filesToProcess.clear();
+  }
+  else
+  {
+    QDir dir(m_inputDir);
+    if (!dir.exists())
+    {
+      emit statusMessage("Директория не найдена: " + m_inputDir);
+      emit finished();
+      return;
+    }
+
+    QStringList filters;
+    filters << m_fileMask;
+    QFileInfoList allFiles = dir.entryInfoList(filters, QDir::Files);
+
+    for (const QFileInfo &fi : allFiles)
+    {
+      if (m_cache && fi.absoluteFilePath() == m_cache->cacheFilePath())
+      {
+        continue;
+      }
+      fileList << fi;
+    }
+  }
 
   if (fileList.isEmpty())
   {
-    emit statusMessage("Файлы не найдены по маске: " + m_fileMask);
+    emit statusMessage("Файлы не найдены");
     emit finished();
     return;
   }
 
-  emit statusMessage("Найдено файлов: " + QString::number(fileList.size()));
+  qDebug() << "Found" << fileList.size() << "files to process";
 
-  const qint64 CHUNK_SIZE = 4 * 1024 * 1024; // 4 MB
-  qint64 totalProcessed = 0;
-  qint64 totalSize = 0;
-
-  // Подсчет общего размера
+  m_totalSize = 0;
   for (const QFileInfo &fi : fileList)
   {
-    totalSize += fi.size();
+    m_totalSize += fi.size();
   }
+
+  m_filesRemaining.store(fileList.size());
+  emit totalFilesCount(fileList.size());
+
+  m_cache = std::make_unique<FileCache>(m_outputDir);
 
   for (const QFileInfo &fileInfo : fileList)
   {
     if (m_isStopped)
-    {
       break;
-    }
 
-    QFile inputFile(fileInfo.absoluteFilePath());
-    if (!inputFile.open(QIODevice::ReadOnly))
-    {
-      emit statusMessage("Ошибка открытия: " + fileInfo.fileName());
-      continue;
-    }
+    auto *processor = new FileProcessor(
+        fileInfo.absoluteFilePath(),
+        m_outputDir,
+        m_operation.get(),
+        m_conflictMode,
+        m_isPaused,
+        m_isStopped,
+        m_cache.get(),
+        this);
 
-    QString outPath = m_outputDir + "/" + fileInfo.fileName();
-    if (!m_overwriteMode)
-    {
-      outPath = getUniquePath(outPath);
-    }
-
-    QFile outputFile(outPath);
-    if (!outputFile.open(QIODevice::WriteOnly))
-    {
-      emit statusMessage("Ошибка создания: " + outPath);
-      inputFile.close();
-      continue;
-    }
-
-    emit fileProgressChanged(fileInfo.fileName(), 0, fileInfo.size());
-
-    qint64 fileSize = fileInfo.size();
-    qint64 fileProcessed = 0;
-    QByteArray buffer(CHUNK_SIZE, Qt::Uninitialized);
-
-    while (!inputFile.atEnd() && !m_isStopped)
-    {
-      // Проверка паузы
-      while (m_isPaused && !m_isStopped)
-      {
-        QThread::msleep(100);
-      }
-      if (m_isStopped)
-      {
-        break;
-      }
-
-      qint64 bytesRead = inputFile.read(buffer.data(), CHUNK_SIZE);
-      if (bytesRead <= 0)
-      {
-        break;
-      }
-
-      // XOR операция
-      for (qint64 i = 0; i < bytesRead; ++i)
-      {
-        buffer[i] = buffer[i] ^ m_xorKey[i % 8];
-      }
-
-      outputFile.write(buffer.data(), bytesRead);
-      fileProcessed += bytesRead;
-      totalProcessed += bytesRead;
-
-      emit fileProgressChanged(fileInfo.fileName(), fileProcessed, fileSize);
-      emit progressChanged(totalProcessed, totalSize);
-    }
-
-    inputFile.close();
-    outputFile.close();
-
-    if (m_deleteInput && !m_isStopped)
-    {
-      inputFile.remove();
-    }
-
-    emit statusMessage("Обработан: " + fileInfo.fileName());
+    emit fileStarted(fileInfo.fileName(), fileInfo.size());
+    m_threadPool->start(processor);
   }
 
-  if (m_isStopped)
-  {
-    emit statusMessage("Обработка остановлена");
-  }
-  else
-  {
-    emit statusMessage("Обработка завершена");
-  }
-
-  emit finished();
+  qDebug() << "=== Worker::processFiles() completed ===";
 }
 
 void Worker::pause()
 {
   m_isPaused = true;
+  m_state = WorkerState::Paused;
+  emit statusMessage("Пауза");
 }
 
 void Worker::resume()
 {
   m_isPaused = false;
+  m_state = WorkerState::Running;
+  emit statusMessage("Возобновление");
 }
 
 void Worker::stop()
 {
   m_isStopped = true;
   m_isPaused = false;
+  m_state = WorkerState::Stopping;
+
+  m_threadPool->clear();
+  m_threadPool->waitForDone(5000);
+
+  m_filesRemaining.store(0);
+  emit statusMessage("Обработка остановлена");
+
+  QMutexLocker locker(&m_counterMutex);
+  if (!m_finishedEmitted)
+  {
+    m_finishedEmitted = true;
+    emit finished();
+  }
+}
+
+void Worker::onFileResult(const FileResult &result)
+{
+  qDebug() << "Worker::onFileResult():" << result.fileName
+           << "status:" << static_cast<int>(result.status);
+
+  switch (result.status)
+  {
+  case FileResult::Status::Success:
+    emit statusMessage("Обработан: " + result.fileName);
+    emit fileFinished(result.fileName, true);
+    break;
+
+  case FileResult::Status::Skipped:
+    emit statusMessage("Пропущен: " + result.fileName);
+    emit fileSkipped(result.fileName);
+    break;
+
+  case FileResult::Status::Error:
+    emit statusMessage("Ошибка: " + result.fileName + " — " + result.errorMessage);
+    emit fileFinished(result.fileName, false);
+    break;
+  }
+
+  int remaining = m_filesRemaining.fetch_sub(1) - 1;
+
+  qDebug() << "Remaining:" << remaining;
+
+  if (remaining == 0)
+  {
+    QMutexLocker locker(&m_counterMutex);
+    if (!m_finishedEmitted)
+    {
+      m_finishedEmitted = true;
+      qDebug() << "Emitting finished()";
+      emit statusMessage("Все файлы обработаны");
+      emit finished();
+    }
+  }
+}
+
+void Worker::onFileProgress(const QString &fileName, qint64 processed, qint64 total)
+{
+  qint64 totalProcessed = 0;
+
+  {
+    QMutexLocker locker(&m_progressMutex);
+    m_fileProgress[fileName] = processed;
+
+    for (qint64 p : m_fileProgress.values())
+    {
+      totalProcessed += p;
+    }
+  }
+
+  emit fileProgressChanged(fileName, processed, total);
+
+  if (m_totalSize > 0)
+  {
+    emit progressChanged(totalProcessed, m_totalSize);
+  }
 }

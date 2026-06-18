@@ -75,14 +75,33 @@ setup-msys:
         mingw-w64-x86_64-just
     @echo "✅ Все пакеты успешно установлены!"
     
-# Запуск тестов
-test:
-    @cmake --build "{{DEBUG_DIR}}" --target FileXorTool_tests
-    @cd "{{DEBUG_DIR}}" && ctest --output-on-failure
-    @echo "✅ Тесты пройдены"
 
-# Запуск тестов с подробным выводом
-test-verbose:
-    @cmake --build "{{DEBUG_DIR}}" --target FileXorTool_tests
-    @cd "{{DEBUG_DIR}}" && ctest --output-on-failure -V
-    @echo "✅ Тесты пройдены"
+# Запуск всех тестов
+test:
+    @cmake --build "{{DEBUG_DIR}}" --target test_operations test_file_utils test_file_cache test_worker test_stress test_mainwindow
+    @cd "{{DEBUG_DIR}}" && ctest --output-on-failure
+    @echo "✅ All tests passed"
+
+# Запуск только быстрых unit-тестов
+test-fast:
+    @cmake --build "{{DEBUG_DIR}}" --target test_operations test_file_utils test_file_cache
+    @cd "{{DEBUG_DIR}}" && ctest --output-on-failure -R "test_operations|test_file_utils|test_file_cache"
+    @echo "✅ Fast tests passed"
+
+# Запуск интеграционных тестов Worker
+test-worker:
+    @cmake --build "{{DEBUG_DIR}}" --target test_worker
+    @cd "{{DEBUG_DIR}}" && ctest --output-on-failure -R test_worker
+    @echo "✅ Worker tests passed"
+
+# Запуск стресс-тестов (боевые условия)
+test-stress:
+    @cmake --build "{{DEBUG_DIR}}" --target test_stress
+    @cd "{{DEBUG_DIR}}" && ctest --output-on-failure -R test_stress -V
+    @echo "✅ Stress tests passed (no crashes!)"
+
+# Запуск GUI-тестов
+test-gui:
+    @cmake --build "{{DEBUG_DIR}}" --target test_mainwindow
+    @cd "{{DEBUG_DIR}}" && ctest --output-on-failure -R test_mainwindow -V
+    @echo "✅ GUI tests passed"

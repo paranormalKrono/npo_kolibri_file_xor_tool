@@ -1,0 +1,71 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    
+    defaults:
+      run:
+        shell: msys2 {0}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup MSYS2
+      uses: msys2/setup-msys2@v2
+      with:
+        msystem: MINGW64
+        update: true
+        install: >-
+          mingw-w64-x86_64-toolchain
+          mingw-w64-x86_64-cmake
+          mingw-w64-x86_64-qt6-base
+          mingw-w64-x86_64-qt6-tools
+          mingw-w64-x86_64-just
+          mingw-w64-x86_64-nsis
+    
+    - name: Configure CMake (Debug)
+      run: cmake -B build/debug -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Debug
+    
+    - name: Build project
+      run: cmake --build build/debug --parallel
+    
+    - name: Build tests
+      run: |
+        cmake --build build/debug --target test_hex_parser
+        cmake --build build/debug --target test_file_utils
+        cmake --build build/debug --target test_worker
+    
+    - name: Run fast tests (HexParser + FileUtils)
+      run: |
+        cd build/debug
+        ctest --output-on-failure -R "test_hex_parser|test_file_utils"
+    
+    - name: Run Worker tests
+      run: |
+        cd build/debug
+        ctest --output-on-failure -R test_worker
+    
+    - name: Build Release
+      run: |
+        cmake -B build/release -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
+        cmake --build build/release --parallel
+    
+    - name: Create package
+      run: |
+        cd build/release
+        cpack -G ZIP
+    
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: FileXorTool-Windows
+        path: build/release/_CPack_Packages/**/*.zip
+        if-no-files-found: warn
