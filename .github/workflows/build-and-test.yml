@@ -31,27 +31,40 @@ jobs:
           mingw-w64-x86_64-just
           mingw-w64-x86_64-nsis
     
+    - name: Cache CMake build
+      uses: actions/cache@v4
+      with:
+        path: build
+        key: ${{ runner.os }}-cmake-${{ hashFiles('**/CMakeLists.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-cmake-
+    
     - name: Configure CMake (Debug)
       run: cmake -B build/debug -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Debug
     
-    - name: Build project
+    - name: Build all targets
       run: cmake --build build/debug --parallel
     
-    - name: Build tests
-      run: |
-        cmake --build build/debug --target test_hex_parser
-        cmake --build build/debug --target test_file_utils
-        cmake --build build/debug --target test_worker
-    
-    - name: Run fast tests (HexParser + FileUtils)
+    - name: Run unit tests (HexParser, FileUtils, FileCache, Operations)
       run: |
         cd build/debug
-        ctest --output-on-failure -R "test_hex_parser|test_file_utils"
+        ctest --output-on-failure -R "test_hex_parser|test_file_utils|test_file_cache|test_operations" -V
     
-    - name: Run Worker tests
+    - name: Run integration tests (Worker)
       run: |
         cd build/debug
-        ctest --output-on-failure -R test_worker
+        ctest --output-on-failure -R test_worker -V
+    
+    - name: Run stress tests
+      run: |
+        cd build/debug
+        ctest --output-on-failure -R test_stress -V
+    
+    - name: Run GUI tests
+      run: |
+        cd build/debug
+        ctest --output-on-failure -R test_mainwindow -V
+      continue-on-error: true  # GUI-тесты могут падать на headless CI
     
     - name: Build Release
       run: |
@@ -69,3 +82,4 @@ jobs:
         name: FileXorTool-Windows
         path: build/release/_CPack_Packages/**/*.zip
         if-no-files-found: warn
+        retention-days: 30
