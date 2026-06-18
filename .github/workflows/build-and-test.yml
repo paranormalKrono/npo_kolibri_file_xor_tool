@@ -10,10 +10,6 @@ jobs:
   build-and-test:
     runs-on: windows-latest
     
-    defaults:
-      run:
-        shell: msys2 {0}
-    
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -32,60 +28,78 @@ jobs:
           mingw-w64-x86_64-nsis
     
     - name: Verify environment
+      shell: msys2 {0}
       run: |
         echo "=== Environment Check ==="
         echo "MSYSTEM: $MSYSTEM"
+        echo "Current directory: $(pwd)"
         cmake --version
-        qmake6 --version
-        just --version
+        qmake6 --version || echo "qmake6 not found"
+        just --version || echo "just not found"
         echo "========================="
     
     - name: Configure CMake (Debug)
+      shell: msys2 {0}
       run: |
-        echo "Configuring CMake..."
+        echo ">>> Configuring CMake..."
         cmake -B build/debug -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Debug
+        echo ">>> CMake configuration complete"
     
     - name: Build all targets
+      shell: msys2 {0}
       run: |
-        echo "Building project..."
+        echo ">>> Building project..."
         cmake --build build/debug --parallel
+        echo ">>> Build complete"
     
     - name: Run unit tests
+      shell: msys2 {0}
       run: |
-        echo "Running unit tests..."
+        echo ">>> Running unit tests..."
         cd build/debug
         ctest --output-on-failure -R "test_hex_parser|test_file_utils|test_file_cache|test_operations" -V
+        echo ">>> Unit tests complete"
     
     - name: Run integration tests (Worker)
+      shell: msys2 {0}
       run: |
-        echo "Running Worker tests..."
+        echo ">>> Running Worker tests..."
         cd build/debug
         ctest --output-on-failure -R test_worker -V
+        echo ">>> Worker tests complete"
     
     - name: Run stress tests
+      shell: msys2 {0}
       run: |
-        echo "Running stress tests..."
+        echo ">>> Running stress tests..."
         cd build/debug
         ctest --output-on-failure -R test_stress -V
+        echo ">>> Stress tests complete"
     
     - name: Run GUI tests
+      shell: msys2 {0}
       run: |
-        echo "Running GUI tests..."
+        echo ">>> Running GUI tests..."
         cd build/debug
         ctest --output-on-failure -R test_mainwindow -V
+        echo ">>> GUI tests complete"
       continue-on-error: true
     
     - name: Build Release
+      shell: msys2 {0}
       run: |
-        echo "Building Release..."
+        echo ">>> Building Release..."
         cmake -B build/release -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
         cmake --build build/release --parallel
+        echo ">>> Release build complete"
     
     - name: Create package
+      shell: msys2 {0}
       run: |
-        echo "Creating package..."
+        echo ">>> Creating package..."
         cd build/release
         cpack -G ZIP
+        echo ">>> Package created"
     
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
