@@ -31,48 +31,59 @@ jobs:
           mingw-w64-x86_64-just
           mingw-w64-x86_64-nsis
     
-    - name: Cache CMake build
-      uses: actions/cache@v4
-      with:
-        path: build
-        key: ${{ runner.os }}-cmake-${{ hashFiles('**/CMakeLists.txt') }}
-        restore-keys: |
-          ${{ runner.os }}-cmake-
+    - name: Verify environment
+      run: |
+        echo "=== Environment Check ==="
+        echo "MSYSTEM: $MSYSTEM"
+        cmake --version
+        qmake6 --version
+        just --version
+        echo "========================="
     
     - name: Configure CMake (Debug)
-      run: cmake -B build/debug -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Debug
+      run: |
+        echo "Configuring CMake..."
+        cmake -B build/debug -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Debug
     
     - name: Build all targets
-      run: cmake --build build/debug --parallel
-    
-    - name: Run unit tests (HexParser, FileUtils, FileCache, Operations)
       run: |
+        echo "Building project..."
+        cmake --build build/debug --parallel
+    
+    - name: Run unit tests
+      run: |
+        echo "Running unit tests..."
         cd build/debug
         ctest --output-on-failure -R "test_hex_parser|test_file_utils|test_file_cache|test_operations" -V
     
     - name: Run integration tests (Worker)
       run: |
+        echo "Running Worker tests..."
         cd build/debug
         ctest --output-on-failure -R test_worker -V
     
     - name: Run stress tests
       run: |
+        echo "Running stress tests..."
         cd build/debug
         ctest --output-on-failure -R test_stress -V
     
     - name: Run GUI tests
       run: |
+        echo "Running GUI tests..."
         cd build/debug
         ctest --output-on-failure -R test_mainwindow -V
-      continue-on-error: true  # GUI-тесты могут падать на headless CI
+      continue-on-error: true
     
     - name: Build Release
       run: |
+        echo "Building Release..."
         cmake -B build/release -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
         cmake --build build/release --parallel
     
     - name: Create package
       run: |
+        echo "Creating package..."
         cd build/release
         cpack -G ZIP
     
