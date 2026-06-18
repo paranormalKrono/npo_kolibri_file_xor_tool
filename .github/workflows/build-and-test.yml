@@ -24,8 +24,6 @@ jobs:
           mingw-w64-x86_64-cmake
           mingw-w64-x86_64-qt6-base
           mingw-w64-x86_64-qt6-tools
-          mingw-w64-x86_64-just
-          mingw-w64-x86_64-nsis
     
     - name: Verify environment
       shell: msys2 {0}
@@ -34,8 +32,8 @@ jobs:
         echo "MSYSTEM: $MSYSTEM"
         echo "Current directory: $(pwd)"
         cmake --version
+        g++ --version
         qmake6 --version || echo "qmake6 not found"
-        just --version || echo "just not found"
         echo "========================="
     
     - name: Configure CMake (Debug)
